@@ -60,18 +60,7 @@ class RedisService {
     const { keyword, status, startDateTime, endDateTime } = searchValues;
 
     await this.connect();
-    const searchText = keyword ? `${keyword.replace(/[.@\\]/g, "\\$&")}` : "";
-    console.log(
-      `@status:{${status}} @createdDate:[${startDateTime} ${endDateTime}] ${
-        keyword
-          ? `((@accountNo:*${searchText}*) | (@customerFullName:${searchText}) | (@customerEmail:{*${keyword.replace(
-              /[.\s@\\]/g,
-              "\\$&"
-            )}*}) | (@clientId:*${searchText}*))`
-          : ""
-      }`
-    );
-
+    const searchText = keyword ? `*${keyword.replace(/[.@\\]/g, "\\$&")}*` : "";
     try {
       const results = await this.client.call(
         "FT.SEARCH",
@@ -81,7 +70,7 @@ class RedisService {
             ? `((@accountNo:${searchText}) | (@customerFullName:${searchText}) | (@customerEmail:{*${keyword.replace(
                 /[.\s@\\]/g,
                 "\\$&"
-              )}*}) | (@clientId:*${searchText}*))`
+              )}*}) | (@clientId:${searchText}))`
             : ""
         }`
       );
@@ -101,7 +90,7 @@ class RedisService {
     try {
       await pipeline.exec();
       console.log('"insert multi successfully"');
-      
+
       return "insert multi successfully";
     } catch (error) {
       console.log("error multi insert", error);
