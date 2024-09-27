@@ -13,7 +13,6 @@ const connectRedis = async () => {
     client.on("error", (err) => {
         console.log("Redis error: ", err);
     });
-    // await client.connect();
     return client;
 };
 

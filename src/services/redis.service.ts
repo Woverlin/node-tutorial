@@ -1,8 +1,9 @@
 import { isEmpty } from "lodash";
 import connectRedis from "../db/redis";
+import { Redis } from "ioredis";
 
 class RedisService {
-  private client: any;
+  private client: Redis;
 
   async connect() {
     if (isEmpty(this.client)) this.client = await connectRedis();
@@ -72,7 +73,10 @@ class RedisService {
                 "\\$&"
               )}*}) | (@clientId:${searchText}))`
             : ""
-        }`
+        }`,
+        "LIMIT",
+        0,
+        1
       );
       return this.formatRedisSearchResults(results);
     } catch (error) {
