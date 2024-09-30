@@ -19,3 +19,8 @@ export const insertMultiRowsHandler = (req, res) => {
   new RedisService().multipleInsert(req.body);
   res.json({});
 };
+
+export const insertCustomerDataHandler = async (req, res) => {
+  await new RedisService().insertCustomerData(req.body);
+  res.json({});
+};

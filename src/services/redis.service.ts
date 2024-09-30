@@ -1,9 +1,12 @@
 import { isEmpty } from "lodash";
 import connectRedis from "../db/redis";
 import { Redis } from "ioredis";
+import { CustomerRepository, ICustomer } from "fms-models";
 
+const customerRepository = CustomerRepository.getInstance();
 class RedisService {
   private client: Redis;
+  private batchingCustomerSize = 100;
 
   async connect() {
     if (isEmpty(this.client)) this.client = await connectRedis();
@@ -36,8 +39,6 @@ class RedisService {
         "1",
         "customers:",
         "SCHEMA",
-        "status",
-        "TAG",
         "createdDate",
         "NUMERIC",
         "SORTABLE",
@@ -45,8 +46,8 @@ class RedisService {
         "TEXT",
         "customerFullName",
         "TEXT",
-        "accountNo",
-        "TEXT",
+        "accounts",
+        "TAG",
         "customerEmail",
         "TAG"
       );
@@ -57,28 +58,35 @@ class RedisService {
       this.client.quit();
     }
   }
-  async testSearch({ indexName, searchValues }: { indexName: string; searchValues: any }) {
+  async testSearch({
+    indexName,
+    searchValues,
+    paging,
+  }: {
+    indexName: string;
+    searchValues: any;
+    paging: any;
+  }) {
     const { keyword, status, startDateTime, endDateTime } = searchValues;
-
     await this.connect();
     const searchText = keyword ? `*${keyword.replace(/[.@\\]/g, "\\$&")}*` : "";
+    const searchTextTag = keyword ? `*${keyword.replace(/[.\s@\\]/g, "\\$&")}*` : "";
+    const { pageNumber, pageSize } = paging;
+
     try {
       const results = await this.client.call(
         "FT.SEARCH",
         indexName,
-        `@status:{${status}} @createdDate:[${startDateTime} ${endDateTime}] ${
+        `@createdDate:[${startDateTime} ${endDateTime}] ${
           keyword
-            ? `((@accountNo:${searchText}) | (@customerFullName:${searchText}) | (@customerEmail:{*${keyword.replace(
-                /[.\s@\\]/g,
-                "\\$&"
-              )}*}) | (@clientId:${searchText}))`
+            ? `((@accounts:${searchTextTag}) | (@customerFullName:${searchText}) | (@customerEmail:{${searchTextTag}}) | (@clientId:${searchText}))`
             : ""
         }`,
         "LIMIT",
-        0,
-        1
+        pageNumber,
+        pageSize
       );
-      return this.formatRedisSearchResults(results);
+      return this.formatRedisSearchResults(results, pageSize);
     } catch (error) {
       console.log("error searching:", error);
     }
@@ -101,8 +109,8 @@ class RedisService {
     }
   }
 
-  formatRedisSearchResults(rawResults) {
-    const totalMatches = rawResults[0];
+  formatRedisSearchResults(rawResults, pageSize) {
+    const total = rawResults[0];
     const formatted: any = [];
 
     for (let i = 1; i < rawResults.length; i += 2) {
@@ -123,9 +131,68 @@ class RedisService {
     }
 
     return {
-      totalMatches,
+      total,
       documents: formatted,
     };
+  }
+
+  async insertCustomerData({ indexName }: { indexName: string; searchValues: any }) {
+    await this.connect();
+    try {
+      const customers = await customerRepository.aggregate([
+        {
+          $match: {
+            createdDate: { $gte: 1727410320000, $lte: 1727481599000 },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            createdDate: 1,
+            clientId: 1,
+            customerEmail: "$email",
+            customerFullName: {
+              $reduce: {
+                input: ["$firstName", "$middleName", "$lastName"],
+                initialValue: "",
+                in: {
+                  $cond: {
+                    if: { $eq: ["$$this", ""] },
+                    then: "$$value",
+                    else: {
+                      $cond: {
+                        if: { $eq: ["$$value", ""] },
+                        then: "$$this",
+                        else: { $concat: ["$$value", " ", "$$this"] },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            accounts: 1,
+          },
+        },
+      ]);
+      console.log("====================================");
+      console.log("customers", customers.length);
+      console.log("====================================");
+      while (customers.length) {
+        const pipeline = this.client.pipeline();
+        const batchingCustomers: any = customers.splice(0, this.batchingCustomerSize);
+
+        batchingCustomers.forEach((item: ICustomer) => {
+          const { clientId } = item;
+          const redisKey = `${indexName}:${clientId}`;
+          pipeline.hset(redisKey, item);
+        });
+        await pipeline.exec();
+      }
+    } catch (error) {
+      console.log("====================================");
+      console.log("123123123", error);
+      console.log("====================================");
+    }
   }
 }
 

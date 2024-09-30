@@ -6,17 +6,17 @@ import { Request, Response } from "express";
 export const registerUser = async (req: Request, res: Response) => {
   const { username, password } = req.body;
   const hashedPassword = await bcrypt.hash(password, 10);
-  const user = new User({ username, password: hashedPassword });
+  const user: any = new User({ username, password: hashedPassword });
   await user.save();
   res.status(201).send("User registered successfully");
 };
 
 export const loginUser = async (req: Request, res: Response) => {
   const { username, password } = req.body;
-  
-  const user = await User.findOne({ username });
+
+  const user: any = await User.findOne({ username });
   console.log("user", user);
-  
+
   if (!user) {
     return res.status(400).send("Invalid username or password");
   }
@@ -26,8 +26,10 @@ export const loginUser = async (req: Request, res: Response) => {
     return res.status(400).send("Invalid username or password");
   }
 
-  const accessToken = jwt.sign({ username: user.username }, "SECRET_KEY", { expiresIn: "30m" });
-  const refreshToken = jwt.sign({ username: user.username }, "REFRESH_SECRET_KEY", { expiresIn: "43200m" });
+  const accessToken = jwt.sign({ username: user?.username }, "SECRET_KEY", { expiresIn: "30m" });
+  const refreshToken = jwt.sign({ username: user?.username }, "REFRESH_SECRET_KEY", {
+    expiresIn: "43200m",
+  });
 
   res.json({ accessToken, refreshToken });
 };
@@ -38,7 +40,7 @@ export const refreshToken = (req: Request, res: Response) => {
 
   jwt.verify(refreshToken, "REFRESH_SECRET_KEY", (err, user) => {
     if (err) return res.sendStatus(403);
-    const accessToken = jwt.sign({ username: user.username }, "SECRET_KEY", { expiresIn: "30m" });
+    const accessToken = jwt.sign({ username: user?.username }, "SECRET_KEY", { expiresIn: "30m" });
     res.json({ accessToken });
   });
 };

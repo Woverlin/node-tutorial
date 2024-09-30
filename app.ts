@@ -6,7 +6,7 @@ import morgan from "morgan";
 import authRoutes from "./src/routes/authRoutes";
 import redisRoutes from "./src/routes/redisRoutes";
 import userRoutes from "./src/routes/userRoutes";
-
+import connectDB from "./src/db/mongo";
 //For env File
 dotenv.config();
 
@@ -27,19 +27,14 @@ app.use(
   })
 );
 
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 5015;
 
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
-
 app.use("/api/redis", redisRoutes);
 
-// connectDB().then(() => {
-//   app.listen(port, () => {
-//     console.log(`Server is running on port ${port}`);
-//   });
-// });
-
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+connectDB().then(() => {
+  app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+  });
 });
