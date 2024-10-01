@@ -27,7 +27,7 @@ app.use(
   })
 );
 
-const port = process.env.PORT || 5015;
+const port = process.env.PORT || 3001;
 
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);

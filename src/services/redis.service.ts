@@ -1,4 +1,4 @@
-import { isEmpty } from "lodash";
+import { isEmpty, map } from "lodash";
 import connectRedis from "../db/redis";
 import { Redis } from "ioredis";
 import { CustomerRepository, ICustomer } from "fms-models";
@@ -86,7 +86,93 @@ class RedisService {
         pageNumber,
         pageSize
       );
-      return this.formatRedisSearchResults(results, pageSize);
+      const data = this.formatRedisSearchResults(results, pageSize);
+
+      const clientIds = map(data?.documents, (it) => +it?.clientId);
+      const query: any = [
+        {
+          $match: {
+            clientId: { $in: clientIds },
+          },
+        },
+        {
+          $project: {
+            fullName: {
+              $reduce: {
+                input: ["$firstName", "$middleName", "$lastName"],
+                initialValue: "",
+                in: {
+                  $cond: {
+                    if: { $eq: ["$$this", ""] },
+                    then: "$$value",
+                    else: {
+                      $cond: {
+                        if: { $eq: ["$$value", ""] },
+                        then: "$$this",
+                        else: { $concat: ["$$value", " ", "$$this"] },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            clientId: 1,
+            dateOfBirth: 1,
+            email: 1,
+            communicationAddress: 1,
+            communicationAddressState: 1,
+            communicationAddressCity: 1,
+            communicationAddressCountry: 1,
+            otherContactNumber: 1,
+            crpStatusId: 1,
+            applicationStageId: 1,
+            channelId: 1,
+            crpLevel: 1,
+            createdDate: 1,
+            idNumber: 1,
+            idType: 1,
+            accounts: 1,
+            note: 1,
+            hasAlert: 1,
+          },
+        },
+        { $sort: { createdDate: -1, fullName: 1 } },
+        {
+          $facet: {
+            data: [
+              {
+                $lookup: {
+                  from: "accounts",
+                  localField: "clientId",
+                  foreignField: "clientId",
+                  pipeline: [
+                    { $match: { isDeleted: { $ne: true } } },
+                    { $project: { accountNo: 1, createdDate: 1 } },
+                    { $sort: { createdDate: -1 } },
+                  ],
+                  as: "accounts",
+                },
+              },
+              {
+                $lookup: {
+                  from: "identifications",
+                  localField: "idType",
+                  foreignField: "id",
+                  pipeline: [{ $limit: 1 }],
+                  as: "identificationInfo",
+                },
+              },
+              {
+                $addFields: {
+                  identificationInfo: { $first: "$identificationInfo" },
+                  accountNo: { $first: "$accounts.accountNo" },
+                },
+              },
+            ],
+          },
+        },
+      ];
+      return await customerRepository.aggregate(query);
     } catch (error) {
       console.log("error searching:", error);
     }
