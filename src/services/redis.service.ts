@@ -6,7 +6,6 @@ import { CustomerRepository, ICustomer } from "fms-models";
 const customerRepository = CustomerRepository.getInstance();
 class RedisService {
   private client: Redis;
-  private batchingCustomerSize = 100;
 
   async connect() {
     if (isEmpty(this.client)) this.client = await connectRedis();
@@ -39,16 +38,20 @@ class RedisService {
         "1",
         "customers:",
         "SCHEMA",
-        "createdDate",
+        "clientId",
         "NUMERIC",
         "SORTABLE",
-        "clientId",
+        "createdDate",
+        "NUMERIC",
+        "dateOfBirth",
+        "NUMERIC",
+        "fullName",
         "TEXT",
-        "customerFullName",
+        "email",
+        "TAG",
+        "idNumber",
         "TEXT",
         "accounts",
-        "TAG",
-        "customerEmail",
         "TAG"
       );
       console.log("Index created successfully!");
@@ -79,7 +82,7 @@ class RedisService {
         indexName,
         `@createdDate:[${startDateTime} ${endDateTime}] ${
           keyword
-            ? `((@accounts:${searchTextTag}) | (@customerFullName:${searchText}) | (@customerEmail:{${searchTextTag}}) | (@clientId:${searchText}))`
+            ? `((@accounts:${searchTextTag}) | (@fullName:${searchText}) | (@email:{${searchTextTag}}) | (@clientId:${searchText}) | (@idNumber:${searchText})) `
             : ""
         }`,
         "LIMIT",
@@ -87,6 +90,8 @@ class RedisService {
         pageSize
       );
       const data = this.formatRedisSearchResults(results, pageSize);
+
+      return data;
 
       const clientIds = map(data?.documents, (it) => +it?.clientId);
       const query: any = [
@@ -224,20 +229,22 @@ class RedisService {
 
   async insertCustomerData({ indexName }: { indexName: string; searchValues: any }) {
     await this.connect();
+    let batchingCustomerSize = 10000;
+    let skip = 2120000;
+    let hasMore = true;
+    const BATCH_SIZE = 50000;
     try {
-      const customers = await customerRepository.aggregate([
-        {
-          $match: {
-            createdDate: { $gte: 1727410320000, $lte: 1727481599000 },
-          },
-        },
-        {
-          $project: {
+      while (hasMore) {
+        const customers = await customerRepository.find(
+          {},
+          {
             _id: 0,
             createdDate: 1,
+            dateOfBirth: 1,
             clientId: 1,
-            customerEmail: "$email",
-            customerFullName: {
+            email: 1,
+            idNumber: 1,
+            fullName: {
               $reduce: {
                 input: ["$firstName", "$middleName", "$lastName"],
                 initialValue: "",
@@ -258,21 +265,26 @@ class RedisService {
             },
             accounts: 1,
           },
-        },
-      ]);
-      console.log("====================================");
-      console.log("customers", customers.length);
-      console.log("====================================");
-      while (customers.length) {
-        const pipeline = this.client.pipeline();
-        const batchingCustomers: any = customers.splice(0, this.batchingCustomerSize);
+          {
+            limit: BATCH_SIZE,
+            skip: skip,
+            sort: { clientId: 1 },
+          }
+        );
+        if (!customers?.length) hasMore = false;
+        while (customers.length) {
+          const pipeline = this.client.pipeline();
+          const batchingCustomers: any = customers.splice(0, batchingCustomerSize);
 
-        batchingCustomers.forEach((item: ICustomer) => {
-          const { clientId } = item;
-          const redisKey = `${indexName}:${clientId}`;
-          pipeline.hset(redisKey, item);
-        });
-        await pipeline.exec();
+          batchingCustomers.forEach((item: ICustomer) => {
+            const { clientId } = item;
+            const redisKey = `${indexName}:${clientId}`;
+            pipeline.hset(redisKey, item);
+          });
+          await pipeline.exec();
+        }
+        console.log("total handled Customer = ", skip);
+        skip += BATCH_SIZE;
       }
     } catch (error) {
       console.log("====================================");
