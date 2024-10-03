@@ -24,3 +24,13 @@ export const insertCustomerDataHandler = async (req, res) => {
   await new RedisService().insertCustomerData(req.body);
   res.json({});
 };
+
+export const queryCustomerDataHandler = async (req, res) => {
+  const data =await new RedisService().queryCustomerData(req.body);
+  res.json(data);
+};
+
+export const searchCombineMongoHandler = async (req, res) => {
+  const rs = await new RedisService().searchCombineMongo(req.body);
+  res.json(rs);
+};

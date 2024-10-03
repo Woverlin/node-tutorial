@@ -39,10 +39,11 @@ class RedisService {
         "customers:",
         "SCHEMA",
         "clientId",
-        "NUMERIC",
+        "TEXT",
         "SORTABLE",
         "createdDate",
         "NUMERIC",
+        "SORTABLE",
         "dateOfBirth",
         "NUMERIC",
         "fullName",
@@ -61,6 +62,11 @@ class RedisService {
       this.client.quit();
     }
   }
+
+  async queryCustomerData({ email }) {
+    const regex = new RegExp(email, "i");
+    return await customerRepository.find({ email });
+  }
   async testSearch({
     indexName,
     searchValues,
@@ -70,7 +76,77 @@ class RedisService {
     searchValues: any;
     paging: any;
   }) {
-    const { keyword, status, startDateTime, endDateTime } = searchValues;
+    const { keyword, startDateTime, endDateTime } = searchValues;
+    await this.connect();
+    const searchText = keyword ? `${keyword.replace(/[.@\\]/g, "\\$&")}` : "";
+    const searchTextTag = keyword ? `*${keyword.replace(/[.\s@\\]/g, "\\$&")}*` : "";
+    const { pageNumber, pageSize } = paging;
+
+    try {
+      const results = await this.client.call(
+        "FT.AGGREGATE",
+        indexName,
+        // `${
+        //   keyword
+        //     ? `((@accounts:${searchTextTag}) | (@fullName:${searchText}) | (@email:{${searchTextTag}}) | (@clientId:${searchText}) | (@idNumber:${searchText}))`
+        //     : ""
+        // }`,
+        // `${keyword ? `(@email:{${searchTextTag}})` : "*"}`,
+        `${keyword ? `@fullName:${searchText}` : "*"}`,
+
+        // "SORTBY",
+        // "2",
+        // "@dateOfBirth",
+        // "DESC",
+        // "LIMIT",
+        // pageNumber,
+        // pageSize,
+        "LOAD",
+        "*",
+        // "clientId"
+      );
+      console.log(
+        "FT.AGGREGATE",
+        indexName,
+        // `${
+        //   keyword
+        //     ? `((@accounts:${searchTextTag}) | (@fullName:${searchText}) | (@email:{${searchTextTag}}) | (@clientId:${searchText}) | (@idNumber:${searchText}))`
+        //     : ""
+        // }`,
+        `${keyword ? `(@email:{${searchTextTag}})` : "*"}`,
+        // `${keyword ? `@fullName:${searchText}` : "*"}`,
+
+        // "SORTBY",
+        // "2",
+        // "@dateOfBirth",
+        // "DESC",
+        // "LIMIT",
+        // pageNumber,
+        // pageSize,
+        "LOAD",
+        "*",
+        // "clientId"
+      );
+
+      let data: any;
+
+      data = this.formatData(results);
+      return data;
+    } catch (error) {
+      console.log("error searching:", error);
+    }
+  }
+
+  async searchCombineMongo({
+    indexName,
+    searchValues,
+    paging,
+  }: {
+    indexName: string;
+    searchValues: any;
+    paging: any;
+  }) {
+    const { keyword, startDateTime, endDateTime } = searchValues;
     await this.connect();
     const searchText = keyword ? `*${keyword.replace(/[.@\\]/g, "\\$&")}*` : "";
     const searchTextTag = keyword ? `*${keyword.replace(/[.\s@\\]/g, "\\$&")}*` : "";
@@ -78,110 +154,121 @@ class RedisService {
 
     try {
       const results = await this.client.call(
-        "FT.SEARCH",
+        "FT.AGGREGATE",
         indexName,
-        `@createdDate:[${startDateTime} ${endDateTime}] ${
-          keyword
-            ? `((@accounts:${searchTextTag}) | (@fullName:${searchText}) | (@email:{${searchTextTag}}) | (@clientId:${searchText}) | (@idNumber:${searchText})) `
-            : ""
-        }`,
+        // `${
+        //   keyword
+        //     ? `((@accounts:${searchTextTag}) | (@fullName:${searchText}) | (@email:{${searchTextTag}}) | (@clientId:${searchText}) | (@idNumber:${searchText}))`
+        //     : ""
+        // }`,
+        `${keyword ? `(@email:{${searchTextTag}})` : "*"}`,
+        // "SORTBY",
+        // "2",
+        // "@dateOfBirth",
+        // "DESC",
         "LIMIT",
         pageNumber,
-        pageSize
+        pageSize,
+        "LOAD",
+        "1",
+        "clientId"
       );
-      const data = this.formatRedisSearchResults(results, pageSize);
 
-      return data;
+      let data: any;
 
-      const clientIds = map(data?.documents, (it) => +it?.clientId);
-      const query: any = [
-        {
-          $match: {
-            clientId: { $in: clientIds },
-          },
-        },
-        {
-          $project: {
-            fullName: {
-              $reduce: {
-                input: ["$firstName", "$middleName", "$lastName"],
-                initialValue: "",
-                in: {
-                  $cond: {
-                    if: { $eq: ["$$this", ""] },
-                    then: "$$value",
-                    else: {
-                      $cond: {
-                        if: { $eq: ["$$value", ""] },
-                        then: "$$this",
-                        else: { $concat: ["$$value", " ", "$$this"] },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            clientId: 1,
-            dateOfBirth: 1,
-            email: 1,
-            communicationAddress: 1,
-            communicationAddressState: 1,
-            communicationAddressCity: 1,
-            communicationAddressCountry: 1,
-            otherContactNumber: 1,
-            crpStatusId: 1,
-            applicationStageId: 1,
-            channelId: 1,
-            crpLevel: 1,
-            createdDate: 1,
-            idNumber: 1,
-            idType: 1,
-            accounts: 1,
-            note: 1,
-            hasAlert: 1,
-          },
-        },
-        { $sort: { createdDate: -1, fullName: 1 } },
-        {
-          $facet: {
-            data: [
-              {
-                $lookup: {
-                  from: "accounts",
-                  localField: "clientId",
-                  foreignField: "clientId",
-                  pipeline: [
-                    { $match: { isDeleted: { $ne: true } } },
-                    { $project: { accountNo: 1, createdDate: 1 } },
-                    { $sort: { createdDate: -1 } },
-                  ],
-                  as: "accounts",
-                },
-              },
-              {
-                $lookup: {
-                  from: "identifications",
-                  localField: "idType",
-                  foreignField: "id",
-                  pipeline: [{ $limit: 1 }],
-                  as: "identificationInfo",
-                },
-              },
-              {
-                $addFields: {
-                  identificationInfo: { $first: "$identificationInfo" },
-                  accountNo: { $first: "$accounts.accountNo" },
-                },
-              },
-            ],
-          },
-        },
-      ];
-      return await customerRepository.aggregate(query);
+      data = this.formatData(results);
+
+      const clientIds = map(data?.data, (it) => +it?.clientId);
+      return await customerRepository.find({ clientId: { $in: clientIds } });
+      // const query: any = [
+      //   {
+      //     $match: {
+      //       clientId: { $in: clientIds },
+      //     },
+      //   },
+      //   {
+      //     $project: {
+      //       fullName: {
+      //         $reduce: {
+      //           input: ["$firstName", "$middleName", "$lastName"],
+      //           initialValue: "",
+      //           in: {
+      //             $cond: {
+      //               if: { $eq: ["$$this", ""] },
+      //               then: "$$value",
+      //               else: {
+      //                 $cond: {
+      //                   if: { $eq: ["$$value", ""] },
+      //                   then: "$$this",
+      //                   else: { $concat: ["$$value", " ", "$$this"] },
+      //                 },
+      //               },
+      //             },
+      //           },
+      //         },
+      //       },
+      //       clientId: 1,
+      //       dateOfBirth: 1,
+      //       email: 1,
+      //       communicationAddress: 1,
+      //       communicationAddressState: 1,
+      //       communicationAddressCity: 1,
+      //       communicationAddressCountry: 1,
+      //       otherContactNumber: 1,
+      //       crpStatusId: 1,
+      //       applicationStageId: 1,
+      //       channelId: 1,
+      //       crpLevel: 1,
+      //       createdDate: 1,
+      //       idNumber: 1,
+      //       idType: 1,
+      //       accounts: 1,
+      //       note: 1,
+      //       hasAlert: 1,
+      //     },
+      //   },
+      //   { $sort: { createdDate: -1, fullName: 1 } },
+      //   {
+      //     $facet: {
+      //       data: [
+      //         {
+      //           $lookup: {
+      //             from: "accounts",
+      //             localField: "clientId",
+      //             foreignField: "clientId",
+      //             pipeline: [
+      //               { $match: { isDeleted: { $ne: true } } },
+      //               { $project: { accountNo: 1, createdDate: 1 } },
+      //               { $sort: { createdDate: -1 } },
+      //             ],
+      //             as: "accounts",
+      //           },
+      //         },
+      //         {
+      //           $lookup: {
+      //             from: "identifications",
+      //             localField: "idType",
+      //             foreignField: "id",
+      //             pipeline: [{ $limit: 1 }],
+      //             as: "identificationInfo",
+      //           },
+      //         },
+      //         {
+      //           $addFields: {
+      //             identificationInfo: { $first: "$identificationInfo" },
+      //             accountNo: { $first: "$accounts.accountNo" },
+      //           },
+      //         },
+      //       ],
+      //     },
+      //   },
+      // ];
+
     } catch (error) {
       console.log("error searching:", error);
     }
   }
+
   async multipleInsert({ indexName, data }) {
     await this.connect();
     const pipeline = this.client.pipeline();
@@ -200,30 +287,26 @@ class RedisService {
     }
   }
 
-  formatRedisSearchResults(rawResults, pageSize) {
-    const total = rawResults[0];
-    const formatted: any = [];
+  formatData(inputData) {
+    const total = inputData[0]; // Get the total number
+    const formattedData = [];
 
-    for (let i = 1; i < rawResults.length; i += 2) {
-      const docKey = rawResults[i];
-      const docFields = rawResults[i + 1];
-      const docObject = {};
-      for (let j = 0; j < docFields.length; j += 2) {
-        const field = docFields[j];
-        const value = docFields[j + 1];
-        docObject[field] = value;
+    for (let i = 1; i < inputData.length; i++) {
+      const itemArray = inputData[i];
+      const obj = {};
+
+      for (let j = 0; j < itemArray.length; j += 2) {
+        const key = itemArray[j];
+        const value = itemArray[j + 1];
+        obj[key] = value;
       }
 
-      // Add the key and the document object to the formatted array
-      formatted.push({
-        key: docKey,
-        ...docObject,
-      });
+      formattedData.push(obj);
     }
 
     return {
-      total,
-      documents: formatted,
+      total: total,
+      data: formattedData,
     };
   }
 
@@ -295,3 +378,11 @@ class RedisService {
 }
 
 export default RedisService;
+
+
+
+//FT.AGGREGATE customerIndex "*lejoyrequinala*" sortby 2 @clientId DESC LIMIT 0 1 load 1 clientId
+
+//FT.AGGREGATE customerIndex @email:{lejoyrequinala\@gmail\.c} LIMIT 0 1
+
+//ft.AGGREGATE customerIndex @email:{*001tobedoctor\@gmail\.com*} LIMIT 0 10 load 1
