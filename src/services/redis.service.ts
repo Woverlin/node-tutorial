@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { isEmpty, map } from "lodash";
 import connectRedis from "../db/redis";
 import { Redis } from "ioredis";
@@ -81,52 +82,37 @@ class RedisService {
     const searchText = keyword ? `${keyword.replace(/[.@\\]/g, "\\$&")}` : "";
     const searchTextTag = keyword ? `*${keyword.replace(/[.\s@\\]/g, "\\$&")}*` : "";
     const { pageNumber, pageSize } = paging;
+    console.log("searchText", JSON.stringify(searchText));
 
     try {
-      const results = await this.client.call(
+      const query: any[] = [
         "FT.AGGREGATE",
         indexName,
         // `${
         //   keyword
-        //     ? `((@accounts:${searchTextTag}) | (@fullName:${searchText}) | (@email:{${searchTextTag}}) | (@clientId:${searchText}) | (@idNumber:${searchText}))`
+        //     ? `((@accounts:{${searchText}}) | (@fullName:${searchText}) | (@email*${searchText}) | (@clientId:${searchText}) | (@idNumber:${searchText}))`
         //     : ""
         // }`,
         // `${keyword ? `(@email:{${searchTextTag}})` : "*"}`,
-        `${keyword ? `@fullName:${searchText}` : "*"}`,
-
-        // "SORTBY",
-        // "2",
-        // "@dateOfBirth",
-        // "DESC",
-        // "LIMIT",
-        // pageNumber,
-        // pageSize,
+        `${keyword ? `@fullName:*${searchText}*` : "*"}`,
+        "SORTBY",
+        "2",
+        "@dateOfBirth",
+        "DESC",
+        "LIMIT",
+        pageNumber,
+        pageSize,
         "LOAD",
-        "*",
-        // "clientId"
-      );
-      console.log(
-        "FT.AGGREGATE",
-        indexName,
-        // `${
-        //   keyword
-        //     ? `((@accounts:${searchTextTag}) | (@fullName:${searchText}) | (@email:{${searchTextTag}}) | (@clientId:${searchText}) | (@idNumber:${searchText}))`
-        //     : ""
-        // }`,
-        `${keyword ? `(@email:{${searchTextTag}})` : "*"}`,
-        // `${keyword ? `@fullName:${searchText}` : "*"}`,
+        "3",
+        "clientId",
+        "email",
+        "fullName",
+        "DIALECT",
+        "3",
+      ];
 
-        // "SORTBY",
-        // "2",
-        // "@dateOfBirth",
-        // "DESC",
-        // "LIMIT",
-        // pageNumber,
-        // pageSize,
-        "LOAD",
-        "*",
-        // "clientId"
-      );
+      console.log(...query);
+      const results = await this.client.call(...query);
 
       let data: any;
 
@@ -263,7 +249,6 @@ class RedisService {
       //     },
       //   },
       // ];
-
     } catch (error) {
       console.log("error searching:", error);
     }
@@ -313,7 +298,7 @@ class RedisService {
   async insertCustomerData({ indexName }: { indexName: string; searchValues: any }) {
     await this.connect();
     let batchingCustomerSize = 10000;
-    let skip = 2120000;
+    let skip = 0;
     let hasMore = true;
     const BATCH_SIZE = 50000;
     try {
@@ -378,8 +363,6 @@ class RedisService {
 }
 
 export default RedisService;
-
-
 
 //FT.AGGREGATE customerIndex "*lejoyrequinala*" sortby 2 @clientId DESC LIMIT 0 1 load 1 clientId
 
